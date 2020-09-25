@@ -329,5 +329,60 @@ Connect类：封装Client与每个Server的通信连接的基本信息及操作
 > 2. 处理请求
 > 3. 返回结果
 
+##### 接收请求
+
+> 工作： 接收来自各个客户端得RPC请求，并将他们封装成固定的格式（Call类）放到一个共享队列(callQueue)中，以便后续处理。
+
+​        该阶段内部又分为建立连接和接受请求两个子阶段，分别由Listener和Reader两种线程完成。
+
+```
+Listener：
+1. 整个Server只有一个Listener线程，负责监听来自客户端的连接请求，一旦有一个新的请求到达，就会采用轮询的方式从线程池中选择一个Reader线程进行处理。
+2. Listener包含一个Selector对象，用于监听SelectionKey.OP_ACCEPT。对于Listener线程，主循环的实现体是监听是否有新的连接请求到达，并采用用轮询策略选择一个Reader线程处理新连接。
+
+Server：
+1. 整个Reader线程可同时存在多个，它们分别负责接收一部分客户端连接的RPC请求，至于每个Reader负责哪些客户端连接，完全由Listener决定。
+2. Listener包含一个Selector对象，用于监听SelectionKey.OP_READ。对Reader线程，主循环的实现体是监听（它负责的那部分）客户端连接中是否新的RPC请求到达，并将新的RPC请求封装成Call对象，放到共享队列callQueue.
+```
+
+ 
+
+#### 处理请求
+
+主要都是Handler完成：
+
+```
+该阶段主要任务是从共享队列callQueue中获取Call对象，执行对应的函数调用，并将结果返回给客户端，这全部都由Handler线程完成。
+
+如果某些函数调用返回结果很大或者网络速度过慢，可能难以将结果一次性发送到客户端，此使handler尝试将后续发送任务交给Reasponder线程
+```
 
 
+
+#### 返回结果
+
+```
+Server端仅存一个Responder线程，它内部包含一个Selector对象，用于监听SelectionKey.OP_WRITE事件。当Handler没能将结果一次性发送到客户端，会向该Selector对象注册SelectionKey.OP_WRITE事件，进而Responder线程采用异步方式继续发送未完成的结果
+```
+
+
+
+## Hadoop RPC 参数调优
+
+主要配置参数如下：
+
+- **Reader线程数目**。由参数ipc.server.read.threadpool.size配置，默认是1，也就是说，默认情况下，一个RPC Server只包含一个Reader线程。
+- **每个Handler线程对应的最大Call数目**。由Iipc.server.handler.queue.size指定，默认100.。比如：如果Handler数目为10，则整个Call队列最大长度为100 × 10 = 1000
+- **客户端最大重试次数**：由ipc.client.connect.max.retries指定，默认值为10，也就是会尝试10次（每次相隔1秒）
+
+
+
+## YARN RPC实现
+
+![image-20200925215103348](C:\Users\Auraros\AppData\Roaming\Typora\typora-user-images\image-20200925215103348.png)
+
+> RPC类变成了一个工厂，它将具体的RPC实现授权给了RpcEngine实现类，在该图中，WritableRpcEngine是才用Hadoop自带的序列化框架实现的RPC，而AvroRpcEngine和ProtobufRpcEinge分别是开源的RPC框架框架。
+>
+> 用户可以通过配置参数rpc.engine.{protocol}以指定协议采用的序列化方式。
+>
+> YARN提供的对外类是YarnRPC，用户只需要使用该类便可以构建一个基于Hadoop RPC且采用Protocol Buffer序列化框架的通信协议。
