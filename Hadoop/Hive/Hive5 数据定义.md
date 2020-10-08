@@ -193,4 +193,57 @@ state	string
 ...
 ```
 
-根哈根萨达、
+- 外部分区表
+
+```
+管理大型生产数据集最常用的情况就是建立外部分区表，这个结合给用户提供了一个可以和其他工具共享数据的方式，也可以优化查询性能。
+用户可以自己定义目录结构，对目录结构的使用具有更多的灵活性。
+CREATE EXTERNAL TABLE IF NOT EXISTS log_message(
+	hms			INT,
+	severity	STRING,
+	server		STRING,
+	process_id	INT,
+	message		STRING)
+PARTITIONED BY (year INT,month INT, day INT)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+这样的日志数据按照天进行划分，划分数据尺寸合适，按照这个粒度进行查询速度也很快。
+```
+
+```
+好处：
+- 可以将新数据写入到一个专用的目录中，并与位于其他目录中的数据存在明显的区别。
+- 新数据被篡改的风险都降低了，因为新数据的数据子集位于不同目录下
+```
+
+- 查看外部表的分区
+
+```
+hive> SHOW PARTITIONS log_messages;
+...
+year = 2011/month=12/day=31
+...
+```
+
+- 同样的，显示表的详细信息
+
+```
+hive> DESCRIBE EXTENDED log_messages；
+...
+message      string,
+year		int,
+month		int,
+day			int,
+
+Detail Table Information...
+...
+```
+
+想要知道分区的实际路径的话可以输入以下语句
+
+```
+hive> DESCRIBE EXTENDED log_message PARTITION(year=2012, month=1, day=2);
+...
+location:s3n://ourbucket/logs/2011/01/02,
+...
+```
+
