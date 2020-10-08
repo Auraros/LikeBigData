@@ -103,7 +103,7 @@ hive> DESCRIBE mydb.employees.salary;
 salary float Employee salary
 ```
 
-- 内部表和外部表
+### 内部表和外部表
 
 ```
 内部表：上面所创建的表都是内部表（也叫管理表），Hive会或多或少控制着数据的生命周期，当删除一个管理表的时候，Hive也会删除这个表的数据。
@@ -135,3 +135,62 @@ LIKE mydb.employees
 LOCATION '/path/to/data';
 ```
 
+### 分区
+
+- 构建分区表
+
+```
+CREATE TABLE IF NOT EXISTS mydb.employees(
+	name			STRING COMMENT 'Employee name',
+	salary			FLOAT COMMENT 'Employee salary',
+	subordinates	ARRAY<STRING> COMMENT 'Name of subordinates',
+	deductions		MAP<STRING, FLOAT> COMMENT 'Key are deductions names, values are percentages',
+	address			STRUCT<street:STRING, city:STRING, state:STRING, zip:INT> COMMENT 'Home adress')
+PARTITIONED BY (country STRING, state STRING);
+```
+
+没有经过Hive分析过后得表只有一个employees目录与之对应
+
+```
+hdfs://master_server/user/hive/warehouse/mydb.db/employees
+```
+
+分区后可以反映分区子目录
+
+```
+.../employees/country=CA/state=AB
+.../employees/country=CA/state=BC
+...
+.../employees/country=US/state=AL
+```
+
+- 查看表中的所有分区
+
+```
+hive> SHOW PARTITIONS employees;
+...
+Country=CA/state=AB
+Country=CA/state=BC
+```
+
+- 查看分区过滤
+
+```
+hive> SHOW PARTITION employees PARTITION(conutry='US')
+hive> SHOW PARTITION employees PARTITION(conutry='US',state='AK')
+```
+
+- descibe查看分区
+
+```
+hive> DESCRIBE EXTENDED employees;
+name	string,
+...
+adress	strcut<..>
+country	string,
+state	string
+
+...
+```
+
+根哈根萨达、
