@@ -299,8 +299,184 @@ hive> SELECT year(ymd), avg(price_close) FROM stocks
 hive> SELECT a.ymd, a.price_close, b.price_close
 	> FROM stocks a JOIN stocks b ON a.ymd = b.ymd
 	> WHERE a.symbol = 'APPL' AND b.symbol = 'IBM';
-2020-02-02    231.12  1231.21
+2010-01-04    231.12  1231.21
 2020-02-02    231.12  1231.21
 ```
 
-- ON子句制定了两个表
+- ON子句制定了两个表间数据进行连接的条件,目前还不允许使用OR
+- WHERE子句限制了左边表是AAPL的记录，右边表是IBM的记录
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM stocks s JOIN dividends d ON s.ymd=d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'APPL';
+
+1987-05-11  AAPL  77.0   0.015
+1987-05-11  AAPL  77.0   0.015
+1987-05-11  AAPL  77.0   0.015 
+```
+
+```
+hive> SELECT a.ymd, a.price_close, b.price_close, c.price_close 
+	> FROM stocks a JOIN stocks b ON a.ymd = b.ymd
+					JOIN stocks c ON a.ymd = c.ymd
+	> WHERE a.symbol = 'APPL' AND b.symbol = 'IBM' AND c.symbol = 'GE';
+```
+
+大多数情况下，Hive会对每对JOIN连接对象启动一个MapReduce任务。在上面的例子中，首先先启动一个MapReduce job 对表a 和 表 b 进行连接操作。再启动一个MapReduce Job将第一个表的输出和表c进行连接操作。
+
+#### JOIN 优化
+
+> 在前面例子中，每个ON子句都是用到了a.ymd作为其中JOIN连接键。HIve可以通过一个优化可以在同一个MapReduce Job中连接三张表。
+>
+> 提示：当对3个或者更多个表进行JOIN连接时，如果每个ON子句都是用相同的连接键的话，只会产生一个MapReduce job
+
+Hive 自己会假定查询中最后一个表是最大的表，在对每行记录进行连接操作的时候，它会尝试将其他表缓存起来，然后扫描最后那个表进行计算。用户也需要保证联系查询中的表大小是从左到右增加的。
+
+- 第一种方法：
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM stocks s JOIN dividends d ON s.ymd=d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'APPL';
+
+这里默认 dividends表比stock表更大
+```
+
+- 第二种方法
+
+```
+hive>SELECT /*+STREAMTABLE(S)*/ s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM stocks s JOIN dividends d ON s.ymd=d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'APPL';
+```
+
+
+
+#### LEFT OUTER JOIN
+
+左外连接通过关键字LEFT OUTER 进行标识：
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM stocks s LEFT OUTER JOIN dividents d ON s.ymd = d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'AAPL';
+...
+1987-05-01  AAPL    80.0   NULL
+
+1987-05-01  AAPL    80.0   0.0015
+...
+```
+
+JOIN操作符左边表中符合WHERE子句的所有记录都会被返回。JOIN操作符右边表中如果没有符合ON后面连接条件的记录时，那么从右边表指定选择的列的值会是NULL。
+
+
+
+### OUTER JOIN
+
+对于外连接（OUTER JOIN）会忽略掉分区过滤条件。不过，对于内连接（INNER JOIN）使用过滤谓词确实是起作用的。
+
+使用嵌套进行SELECT语句：
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend FROM 
+	> (SELECT * FROM stocks WHERE symbol = 'AAPL' AND exchange = 'NASDAQ') s
+	> LEFT OUTER JOIN
+	> (SELECT * FROM dividends WHERE symbol = 'AAPL' AND exchange = 'NASDAQ') d
+	> ON s.ymd = d.ymd;
+	
+...
+1988-02-10   AAPL   41.0   NULL
+...
+```
+
+> WHERE语句在连接操作执行之后会执行，因此WHERE语句应该只用于过滤那些非NULL值得列值。
+
+
+
+#### RIGHT OUTER JOIN
+
+右外连接会返回右边表所有符合WHERE语句的记录。坐标中匹配不上的字段用NULL代替。
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM dividents d RIGHT OUTER JOIN stocks s ON s.ymd = d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'AAPL';
+...
+1987-05-01  AAPL    80.0   NULL
+
+1987-05-01  AAPL    80.0   0.0015
+...
+```
+
+
+
+#### FULL OUTER JOIN
+
+完全外连接（FULL OUTER JOIN）会返回所有表中符合WHERE语句条件的所有记录。如果任意一个表没有符合条件的值的话，用NULL代替。
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close, d.dividend
+	> FROM dividents d FULL OUTER JOIN stocks s ON s.ymd = d.ymd AND s.symbol = d.symbol
+	> WHERE s.symbol = 'AAPL';
+...
+1987-05-01  AAPL    80.0   NULL
+1987-05-01  AAPL    80.0   0.0015
+...
+```
+
+
+
+### LEFT SEMI-JOIN
+
+左半开连接会返回左边表的记录，前提是记录对于右边表满足ON语句中的判定条件。
+
+在HIVE中不支持的查询：
+
+```
+SELECT s.ymd, s.symbol, s.price_close FROM stocks s
+WHERE s.ymd, s.symbol IN
+(SELECT d.ymd, d.symbol FROM dividends d);
+```
+
+但是可以这么用：
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close
+	> FROM stocks s LEFT SEMI JOIN dividents d ON s.ymd = d.ymd AND s.symbol = d.symbol;
+```
+
+注意，SELECT 和 WHERE语句不能引用到右边表中的字段。
+
+> SEMI-JOIN 比通常的INNER JOIN更高效，原因如下: 对于左表中一条指定的记录，在右表中一旦找到匹配的记录，Hive就会立刻停止扫描。
+
+
+
+### 笛卡尔积 JOIN
+
+笛卡尔积是左表的行数乘以右边表的行数等于笛卡尔积数据集的大小。会执行很长时间。
+
+```
+hive> SELECT * FROM stocks JOIN dividends
+	> WHERE stock.symbol = dividends.symbol and stock.symbol = 'APPL';
+```
+
+> 应用场景： 假设一个表表示用户偏好，另一个表表示新闻文章，同时有一个算法会推测出用户可能会喜欢读哪些文章。
+
+
+
+### map-side JOIN
+
+> 背景：如果所有表中只有一张表是小表，那么可以在最大的表通过mapper的时候将小表完全放到内存中。
+
+> 原因：Hive可以和内存中的小表进行逐一匹配，从而省略掉常规连接操作所需要的reduce过程。
+
+```
+hive> set hive.auto.convert.join=true;
+
+hive>SELECT /*+ MAPJOIN(d)*/ s.ymd, s.symbol, s.price_close, d.dividend
+	>FROM stocks s JOIN dividends d ON s.ymd = d.ymd AND s.symbol = d.symbol 
+	>WHERE s.symbol = 'AAPL';
+```
+
+这个执行速度快了大概30%；
