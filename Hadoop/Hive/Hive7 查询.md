@@ -480,3 +480,130 @@ hive>SELECT /*+ MAPJOIN(d)*/ s.ymd, s.symbol, s.price_close, d.dividend
 ```
 
 这个执行速度快了大概30%；
+
+
+
+## ORDER BY 和 SORT BY
+
+- ORDER BY 
+
+> ORDER BY 语句和其他的SQL方言中的定义是一样的，其会对查询结果执行一个全局排序，也就是说会有一个所有的数据都通过一个reducer进行处理的过程。大的数据集，会执行很长时间。
+
+```
+SELECT s.ymd, s.symbol, s.price_close
+FROM stocks s
+ORDER BY s.ymd ASC, s.symbol DESC;
+```
+
+- SORT BY
+
+> 只会在每个reducer中队数据进行排序，也就是执行一个局部排序的过程，这可以保证每个reducer的输出数据都是有序的。可以提高后面进行的全局排序的效率。
+
+```
+SELECT s.ymd, s.symbol, s.price_close
+FROM stocks s
+SORT BY s.ymd ASC, s.symbol DESC;
+```
+
+
+
+### 含有SORT BY 的 DISTRIBUTE BY
+
+> 背景： 假设我们希望具有相同股票交易码的数据在一起处理，那么我们可以使用DISTRBUTE BY 来保证具有相同的股票交易码的记录会分发到同一个reducer中进行处理，再使用SORT BY来按照我们的期望进行排序
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close
+	> FROM stocks s
+	> DISTRIBUTE BY s.symbol
+	> SORT BY s.symbol ASC, s.ymd ASC;
+1984-09-07  AAPL  26.5
+1984-09-10  AAPL  26.37
+1984-09-11  AAPL  26.87
+```
+
+
+
+## CLUSTER BY
+
+> 前面的例子中，s.symbol列被用在了DISTRIBUTE BY语句中，而s.symbol 列和s.ymd位于SORT BY语句中，如果这两个语句涉及到列完全相同，而且采用的是升序排序方式。那么CLUSTER BY就是等价于前面两个语句
+
+```
+hive> SELECT s.ymd, s.symbol, s.price_close
+	> FROM stocks s
+	> CLUSTER BY s.symbol
+2010-02-08 AAPL 194.12
+2010-02-05 AAPL 195.12
+```
+
+
+
+## 类型转换
+
+### CAST 类型转换
+
+- 字符串转化为FLOAT类型
+
+```
+SELECT name, salary FROM employees
+WHERE cast(salary AS FLOAT) < 100000.0
+```
+
+如果里面的值是不合法的，那么Hive会返回null。
+
+浮点数转化为整数：一般用round()或者floor()；
+
+
+
+### BINARY 值
+
+- BINARY类中转化为STRING类型
+
+```
+SELECT(2.0*cast(cast(b as string)as double)) from src;
+```
+
+
+
+## 抽样查询
+
+### 分桶抽样
+
+> 背景：对于非常大的数据集，HIve可以通过对表进行分桶抽样来满足这个需求。
+
+- 使用rand() 函数进行抽样
+
+  ```
+  SELECT * FROM numbers TABLESAMPLE(BUCKET 3 OUT OF 10 ON rand()) s;
+  ```
+
+### 数据块抽样
+
+- 基于行数进行抽样
+
+  ```
+  hive> SELECT * FROM numbersflat TABLESAMPLE(0.1 PERCENT) s;
+  ```
+
+  这种抽样的最小抽样单元是一个HDFS数据块，如果数据块的大小小于128M的话，会返回所有行。
+
+
+
+## UNION ALL
+
+> UNION ALL 可以将2个或者多个表进行合并，每个union子查询都需具有相同的列，而且对应的类型必须是一致的
+
+```
+数据进行合并
+SELECT log.ymd, log.level, log.message
+		FROM(
+		SELECT l1.ymd, l1.level,
+			l1.message, 'Log1' AS source
+		FROM log1 l1
+	UNOIN ALL
+		SELECT l2.ymd, l2.level,
+			l2.message, 'Log2' AS source
+		FROM log1 l2
+	)log
+SORT BY log.ymd ASC;
+```
+
