@@ -157,3 +157,104 @@ hive> CREATE TABLE weblog (user_id INT, url STRING, source_ip STRING)
 	> CLUSTERED BY (user_id) INTO 96 BUCKETS;
 ```
 
+不过，将数据正确地插入到表地过程完全取决于用户自己，CREATE TABLE语句中所规定地信息仅仅定义了元数据，而不影响实际填充表地命令。
+
+```
+hive> SET hive.enforce.bucketing = true;
+
+hive> FROM raw_logs
+	> INSERT OVERWRITE TABLE weblog
+	> PARTITION (dt = '2019-02025')
+	> SELECT user_id, url source_ip WHERE dt='2019-02-25';
+```
+
+- bucketing参数：如果没有使用这个属性，那么我们就需要自己设置和分桶个数相匹配地reducer个数。
+- 例如： 使用 set mapred.reduce.task=96，然后在INSERT语句中，需要SELECT 语句后增加CLUSTER BY语句。
+
+> 分桶的优点：
+>
+> - 因为桶的个数是固定的，所以没有数据波动。桶非常适合抽样。
+> - 有利于执行高效的map-side JOIN
+
+
+
+## 为表增加列
+
+> Hive允许在原始数据文件之上定义一个模式，而不像很多的数据库那样，必须以特定的格式转换和导入数据。
+
+### SerDe抽象
+
+一个SerDe通常是从左到右进行解析的，通过指定的分隔符将行分解成列。SerDe通常是非常宽松的。如果某行的字段个数比预期的要少，那么缺少的字段将返回null，如果某行的字段个数比预期的要多，那么多出的字段会被省略掉。
+
+```
+hive> CREATE TABLE weblogs(version LONG, url STRING)
+	> PARTITIONED BY (hit_date int)
+	> ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+
+hive> ! cat log1.txt
+1 /mystuff 20110101
+1 /toys 20110101
+
+hive> LOAD DATA LOCAL INPATH 'log1.txt' int weblogs partition(20110101);
+
+hive> SELECT * FROM weblogs;
+1  /mystuff 20110101
+1  /toys    20110101
+```
+
+随着时间的推移，可能会为底层数据增加一个新字段。
+
+```
+hive> ! cat log2.txt
+2 /cars bob
+2 /stuff terry
+
+hive> ALTER TABLE weblogs ADD COLUMNS (user_id string)
+
+hive> LOAD DATA LOCAL INPATH 'log2.txt' int weblogs partition(20110102)
+
+hive SELECT * FROM weblogs
+1 /mystuff  20110101 NULL
+1 /toys     20110101 NULL
+2 /cars 	20110102 bob
+2 /stuff 	20110102 terry
+```
+
+
+
+## 使用列存储表
+
+> Hive提供了一个列式SerDe来以混合列格式存储信息，虽然这个格式是可以用于任意类型的数据的，不过对于某些数据集使用这种方式是最优的
+
+### 重复数据
+
+假设有足够多的行，像state字段和age字段这样的列将会有很多重复的数据。
+
+| state | uid    | age  |
+| ----- | ------ | ---- |
+| NY    | Bob    | 40   |
+| NJ    | Sara   | 32   |
+| NY    | Peter  | 14   |
+| NY    | Sandra | 4    |
+
+### 多列
+
+非常多的字段
+
+| state | uid    | age  | server | tz   | many_more.. |
+| ----- | ------ | ---- | ------ | ---- | ----------- |
+| NY    | Bob    | 40   | web1   | est  | stuff       |
+| NJ    | Sara   | 32   | web1   | est  | stuff       |
+| NY    | Peter  | 14   | web3   | pst  | stuff       |
+| NY    | Sandra | 4    | web45  | pst  | stuff       |
+
+查询通常只会用到一个字段或者很少的一组字段，基于列式存储会使分析表数据行驶执行得更快：
+
+```
+hive> SELECT distinct(state) FROM weblogs;
+NY
+NJ
+```
+
+
+
