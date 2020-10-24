@@ -191,3 +191,39 @@ public void testDelete() throws IOException, InterruptedException, URISyntaxExce
 
 
 
+## 读取文件
+
+```java
+package step2;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IOUtils;
+
+
+public class FileSystemCat {
+	
+	public static void main(String[] args) throws IOException {
+		//请在Begin-End之间添加你的代码，完成任务要求。
+        /********* Begin *********/
+		URI uri = URI.create("hdfs://localhost:9000/user/hadoop/task.txt");
+		Configuration conf = new Configuration();
+		FileSystem fs = FileSystem.get(uri, conf);
+		InputStream in = null;
+		try{
+			in = fs.open(new Path(uri));
+			IOYtils.copyBytes(in, System.out, 2048, false);
+		}catch(Exception e){
+		IOUtils.closeStream(in);
+		}
+		
+		/********* End *********/
+	}
+}
+```
+
