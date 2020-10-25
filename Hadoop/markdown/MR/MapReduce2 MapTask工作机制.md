@@ -1,4 +1,4 @@
-# MapReduce MapTask工作机制
+# MapReduce MapReduce工作机制
 
 ## Job提交阶段
 
@@ -38,7 +38,7 @@ public class sortAllMapper extends Mapper<LongWritable, Text, phoneFlowBean, Tex
 
 在用户编写`map()`函数中，当数据处理完成后，一般会调用`OutputCollector.collect()`输出结果。在该函数内部，它会将生成的`key/value`分区（调用`Partitioner`），并写入一个环形内存缓冲区中。
 
-### （4）Spill阶段
+###  （4）Spill阶段
 
 环形缓冲区（底层是一个数组，左右两边同时写）的默认大小是`100M`, 左边存的是元数据，右边存的是`k-v,`元数据信息包括: `index`` partition` `keystart` `valstart`
 
@@ -74,4 +74,49 @@ public class sortAllMapper extends Mapper<LongWritable, Text, phoneFlowBean, Tex
 对于某个分区，它将采用多轮递归合并的方式，每轮合并`io.sort.factor`(默认10)个文件，并将产生的文件重新加入到待合并列表中，对文件排序后，重复以上过程，直到最终得到一个大文件。
 
 让每个`MapTask`最终只生 成一个数据文件，可避免同时打开大量文件和同时读取大量小文件产生的随机读取带来的开销
+
+
+
+### ReduceTask工作机制
+
+![image-20201024223956439](C:\Users\Auraros\AppData\Roaming\Typora\typora-user-images\image-20201024223956439.png)
+
+### (1)Copy阶段
+
+`ReduceTask`从各个`MapTask`上远程拷贝片数据，并针对某片数据，如果其大小超过定阈值，则写到磁盘上，否则直接放到内存中。`Reduce`进程启动一些数据`copy`线程(`Fetcher`)，通过`HTTP`方式请求`maptask`获取属于自己的文件。
+
+### (2)Merge阶段
+
+在远程拷贝数据的同时，`ReduceTask`启动了两个后台线程(分别为`inMemoryMerger`和`onDiskMerger`)对内存和磁盘上的文件进行合并，以防止内存使用过多或磁盘上文件过多。
+
+这里的`merge`如`map`端的`merge`动作，只是数组中存放的是不同map端`copy`来的数值。`Copy`过来的数据会先放入内存缓冲区中，这里的缓冲区大小要比`map`端的更为灵活。`merge`有三种形式：内存到内存；内存到磁盘；磁盘到磁盘。默认情况下第一种形式不启用。当内存中的数据量到达一定阈值，就启动内存到磁盘的`merge`。与`map` 端类似，这也是溢写的过程，这个过程中如果你设置有`Combiner`，也是会启用的，然后在磁盘中生成了众多的溢写文件。第二种`merge`方式一直在运行，直到没有`map`端的数据时才结束，然后启动第三种磁盘到磁盘的`merge`方式生成最终的文件。
+
+### (3)Sort阶段
+
+按照`MapReduce`语义，用户编写`reduce()`函数输入数据是按key进行聚集的一组数据。为了将`key`相同的数据聚在一起，`Hadoop`采用了基于排序的策略。由于各个`MapTask`已经实现对自己的处理结果进行了局部排序，因此，`ReduceTask`只需对所有数据进行一次归并排序即可。
+
+### (4)Reduce阶段
+
+`reduce()`函数将计算结果写到HDFS上。
+
+## MapReduce总体工作机制
+
+**Map到Reduce内存角度宏观流程**
+
+![image-20201024231000343](C:\Users\Auraros\AppData\Roaming\Typora\typora-user-images\image-20201024231000343.png)
+
+**Map到reduce处理流程角度宏观步骤**
+
+![image-20201024231018958](C:\Users\Auraros\AppData\Roaming\Typora\typora-user-images\image-20201024231018958.png)
+
+- `map`逻辑完之后，将`map`的每条结果通过`context.write`进行`collect`数据收集。在`collect`中，会先对其进行分区处理，默认使用`HashPartitioner`。
+- `MapReduce`提供`Partitioner`接口，它的作用就是根据`key`或`value`及`reduce`的数量来决定当前的这对输出数据最终应该交由哪个`reduce task`处理。默认对`key hash`后再以`reduce task`数量取模。默认的取模方式只是为了平均`reduce`的处理能力，如果用户自己对`Partitioner`有需求，可以订制并设置到`job`上。
+- 当溢写线程启动后，需要对这80MB空间内的`key`做排序(`Sort`)。排序是`MapReduce`模型默认的行为，这里的排序也是对序列化的字节做的排序。
+- 如果`job`设置过`Combiner`，那么现在就是使用`Combiner`的时候了。将有相同`key`的`key/value`对的`value`加起来，减少溢写到磁盘的数据量。`Combiner`会优化`MapReduce`的中间结果，所以它在整个模型中会多次使用。
+
+
+
+**哪些场景才能使用`Combiner`呢？**
+
+从这里分析，`Combiner`的输出是`Reducer`的输入，`Combiner`绝不能改变最终的计算结果。`Combiner`只应该用于那种`Reduce`的输入`key/value`与输出`key/value`类型完全一致，且不影响最终结果的场景。比如累加，最大值等（求平均值绝不能用`Combiner`）。`Combiner`的使用一定得慎重，如果用好，它对`job`执行效率有帮助，反之会影响`reduce`的最终结果。
 
