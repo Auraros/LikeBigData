@@ -18,13 +18,9 @@
 - 重命名表分区：将`2018/Math`分区重命名为`2018/English`
 - 删除表分区：将`2018/Chinese`分区删除
 
-*按照以上要求，在代码栏填写命令。每个要求对应一条命令，共`5`条命令，以`;`隔开。*
-
-*由于`hive`启动时间较长，测评时请耐心等待，大概需要时间：`1-3`分钟。*
 
 
-
-### 答案
+## 代码
 
 ```
 #********* Begin *********#
@@ -52,7 +48,7 @@ ALTER TABLE student DROP IF EXISTS PARTITION (stu_year='2018', subject='Chinese'
 
 
 
-## 解析
+## 题目解析
 
 ##### 创建分区表
 
@@ -75,8 +71,6 @@ COLLECTION ITEMS TERMINATED BY ','
 TBLPROPERTIES ('creator'='Xiaoming','date'='2019-01-01');
 ```
 
-
-
 ##### 添加分区
 
 向表`items_info2`添加两个分区：
@@ -86,7 +80,9 @@ ALTER TABLE items_info2 ADD PARTITION (p_category='clothes',p_brand='playboy') L
 PARTITION (p_category='shoes',p_brand='playboy') LOCATION '/hive/shopping/items_info2/playboy/shoes';
 ```
 
+*注意：`PARTITIONED BY`中的列`p_category`和`p_brand`为伪列，不能与表中的实体列名相同，否则hive表创建操作报错（`p_category`和`p_brand`分别对应表中的实体列`category`、`brand`）。*
 
+##### 重命名表分区
 
 重命名表分区的语法为：
 
@@ -100,8 +96,6 @@ ALTER TABLE table_name PARTITION partition_spec RENAME TO PARTITION partition_sp
 ALTER TABLE items_info2 PARTITION (p_category='clothes',p_brand='playboy') RENAME TO PARTITION (p_category='T-shirt',p_brand='playboy');
 ```
 
-
-
 ##### 交换表分区
 
 交换表分区的语法为：
@@ -112,8 +106,6 @@ ALTER TABLE table_name_1 EXCHANGE PARTITION (partition_spec) WITH TABLE table_na
 
 该操作移动表`table_name_1`中特定分区下的数据到具有相同表模式且不存储在相应分区的`table_name_2`中。
 
-
-
 ##### 表分区信息持久化
 
 表分区信息持久化的语法为：
@@ -123,8 +115,6 @@ MSCK REPAIR TABLE table_name;
 ```
 
 该操作作用于同步表`table_name`在`HDFS`上的分区信息到`Hive`位于`RDBMS` 的`metastore`中。
-
-
 
 ##### 删除表分区
 
