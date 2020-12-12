@@ -1,4 +1,4 @@
-# Flume11 负载均衡和故障转移
+# Flume11 负载均衡
 
 ![image-20201122000242717](C:\Users\Auraros\AppData\Roaming\Typora\typora-user-images\image-20201122000242717.png)
 
